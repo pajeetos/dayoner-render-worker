@@ -112,11 +112,12 @@ def cartoon(job):
     voices = inp.get("voices") or []
     dialogue = inp.get("dialogue") or {}
     upload = inp.get("upload") or {}
-    lines = dialogue.get("lines") or []
+    # One voice per spoken line: the two-character format lists "lines", the scene format "beats" with "say".
+    spoken = [b for b in dialogue.get("beats") or [] if isinstance(b, dict) and b.get("say")] if dialogue.get("beats") else dialogue.get("lines") or []
     if not all(k in scripts for k in REQUIRED) or not all(SCRIPT_NAME.match(k) for k in scripts):
         raise JobError("scripts missing")
-    if not lines or len(lines) > MAX_LINES or len(voices) != len(lines):
-        raise JobError("one voice per line, up to 60 lines")
+    if len(spoken) > MAX_LINES or len(voices) != len(spoken):
+        raise JobError("one voice per spoken line, up to 60 lines")
     if not upload.get("pathname") or not upload.get("token"):
         raise JobError("no upload token")
     engine = inp.get("engine", "eevee")
