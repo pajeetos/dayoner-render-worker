@@ -76,12 +76,14 @@ def render(job, run_dir, eng, env, engine, frames):
     done = {"n": 0}
 
     def on_line(line):
-        if line.startswith("Saved:"):
+        if "Saved:" in line:                # Blender 5 prefixes its log lines with a time
             done["n"] += 1
             if done["n"] % 24 == 0:
                 runpod.serverless.progress_update(job, f"render {done['n']}/{frames}")
 
-    run([BLENDER, "-b", "--factory-startup", "-P", f"{eng}/scene.py", "--", run_dir], eng, {**env, "CARTOON_ENGINE": engine}, 3 * 3600, on_line)
+    # -t: Blender would otherwise start a thread per reported CPU (256 on some hosts) and crawl
+    run([BLENDER, "-b", "--factory-startup", "-t", env.get("CARTOON_CPU_THREADS", "8"), "-P", f"{eng}/scene.py", "--", run_dir], eng,
+        {**env, "CARTOON_ENGINE": engine}, 3 * 3600, on_line)
     if len([f for f in os.listdir(f"{run_dir}/frames") if f.endswith(".jpg")]) < frames:
         raise JobError(f"{engine} rendered {done['n']} of {frames} frames")
 
@@ -161,12 +163,13 @@ def cartoon(job):
             made = len([f for f in os.listdir(f"{run_dir}/models") if f.endswith(".json")])
             model_sec = time.time() - t_m
 
-        runpod.serverless.progress_update(job, "textures and timing")
+        runpod.serverless.progress_update(job, f"textures and timing ({threads} threads)")
         run(["python", f"{eng}/faces.py", run_dir], eng, env, 300)
         run(["python", f"{eng}/plan.py", run_dir], eng, env, 900)
         frames = json.load(open(f"{run_dir}/timeline.json"))["frames"]
 
         t1 = time.time()
+        runpod.serverless.progress_update(job, f"render 0/{frames}")
         try:
             render(job, run_dir, eng, env, engine, frames)
         except JobError as err:
