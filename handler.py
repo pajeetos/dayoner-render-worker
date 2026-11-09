@@ -141,8 +141,10 @@ def cartoon(job):
         for i, url in enumerate(voices, 1):
             ext = "wav" if url.split("?")[0].endswith(".wav") else "mp3"
             fetch(url, f"{run_dir}/voice/{i:02d}.{ext}")
-        threads = str(os.cpu_count() or 4)
-        env = {**os.environ, "CARTOON_NO_BLEND": "1", "CARTOON_CPU_THREADS": threads, "CARTOON_FFMPEG_THREADS": threads}
+        # the CPUs this container may use (a host can report 256), capped: more threads only fight each other
+        threads = str(max(1, min(8, len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count() or 4)))
+        env = {**os.environ, "CARTOON_NO_BLEND": "1", "CARTOON_CPU_THREADS": threads, "CARTOON_FFMPEG_THREADS": threads,
+               "OMP_NUM_THREADS": threads, "OPENBLAS_NUM_THREADS": threads, "MKL_NUM_THREADS": threads}
 
         made, model_sec = 0, 0.0
         if models and "models.py" in scripts:
