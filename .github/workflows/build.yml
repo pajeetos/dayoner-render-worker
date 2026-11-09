@@ -10,6 +10,7 @@ on:
       - upload.mjs
       - package.json
       - requirements.txt
+      - requirements-models.txt
       - .github/workflows/build.yml
   workflow_dispatch:
 

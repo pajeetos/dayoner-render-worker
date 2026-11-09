@@ -1,6 +1,6 @@
 # Dayoner render worker for RunPod Serverless: Blender 5.2 on the GPU (Eevee, or
-# Cycles where Eevee cannot open EGL), ffmpeg, Python with Whisper, and Node for
-# the upload. No render scripts live here: every job brings its own (handler.py).
+# Cycles where Eevee cannot open EGL), ffmpeg, Python with Whisper and TripoSR, and
+# Node for the upload. No render scripts live here: every job brings its own (handler.py).
 FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -38,6 +38,22 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 # Word timings for lip sync: the model is baked in so a cold worker does not download it.
 RUN python -c "from faster_whisper import WhisperModel; WhisperModel('small', device='cpu', compute_type='int8')"
+
+# Props made to order: TripoSR (MIT, VAST and Stability AI), one picture to a 3D field in about a second. PyTorch
+# for CUDA 12.8 runs on every GPU of the endpoint (Ada and Blackwell). The source and weights are pinned and baked in;
+# the job's models.py samples the field into voxels (no marching cubes, so no CUDA build step here).
+RUN pip install --no-cache-dir torch==2.8.0 --index-url https://download.pytorch.org/whl/cu128
+COPY requirements-models.txt .
+RUN pip install --no-cache-dir -r requirements-models.txt
+ARG TRIPOSR_SHA=107cefdc244c39106fa830359024f6a2f1c78871
+ENV TRIPOSR_DIR=/opt/triposr TRIPOSR_WEIGHTS=/opt/triposr/weights
+RUN mkdir -p /opt/triposr/weights \
+ && curl -fsSL "https://codeload.github.com/VAST-AI-Research/TripoSR/tar.gz/${TRIPOSR_SHA}" | tar -xz -C /opt/triposr --strip-components=1 \
+ && curl -fsSL -o /opt/triposr/weights/config.yaml https://huggingface.co/stabilityai/TripoSR/resolve/main/config.yaml \
+ && curl -fsSL -o /opt/triposr/weights/model.ckpt https://huggingface.co/stabilityai/TripoSR/resolve/main/model.ckpt \
+ && python -c "from huggingface_hub import hf_hub_download; hf_hub_download('facebook/dino-vitb16', 'config.json')"
+# Everything a job needs is in the image: no model downloads at run time.
+ENV HF_HUB_OFFLINE=1
 
 COPY package.json .
 RUN npm install --omit=dev --no-audit --no-fund

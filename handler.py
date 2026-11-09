@@ -8,10 +8,12 @@ Job input:
   scripts   {"faces.py": "...", "plan.py": "...", "scene.py": "...", "assemble.py": "...", "fonts.py": "..."}
   dialogue  the run's dialogue.json
   voices    one https link per line, in order (mp3 or wav)
+  models    {"name": "https link to a picture"}: props to make as 3D models first (scripts["models.py"], TripoSR);
+            a model that fails leaves the scene to its fallback boxes
   upload    {"pathname": "...", "token": "..."}: a one-file Vercel Blob token for the result
   engine    "eevee" (default) or "cycles"; Eevee falls back to Cycles when it cannot start
 
-Output: {"url", "bytes", "durationSec", "renderSec", "totalSec", "frames", "engine", "gpu"}
+Output: {"url", "bytes", "durationSec", "renderSec", "totalSec", "frames", "engine", "gpu", "models", "modelSec"}
 """
 import json
 import os
@@ -27,6 +29,8 @@ BLENDER = os.environ.get("BLENDER_BIN", "/opt/blender/blender")
 SCRIPT_NAME = re.compile(r"^[a-z_]+\.py$")
 MAX_VOICE = 20 * 1024 * 1024
 MAX_LINES = 60
+MAX_MODELS = 6
+MODEL_NAME = re.compile(r"^[a-z0-9_]{1,16}$")
 REQUIRED = ("faces.py", "plan.py", "scene.py", "assemble.py")
 
 
@@ -43,11 +47,11 @@ def gpu_name():
 
 def fetch(url, dest):
     if not isinstance(url, str) or not url.startswith("https://"):
-        raise JobError(f"bad voice link: {str(url)[:80]}")
+        raise JobError(f"bad link: {str(url)[:80]}")
     with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "dayoner-render-worker"}), timeout=120) as r:
         data = r.read(MAX_VOICE + 1)
     if len(data) > MAX_VOICE:
-        raise JobError("voice file too big")
+        raise JobError("file too big")
     with open(dest, "wb") as f:
         f.write(data)
 
@@ -120,6 +124,9 @@ def cartoon(job):
         raise JobError("one voice per spoken line, up to 60 lines")
     if not upload.get("pathname") or not upload.get("token"):
         raise JobError("no upload token")
+    models = inp.get("models") or {}
+    if not isinstance(models, dict) or len(models) > MAX_MODELS or not all(MODEL_NAME.match(k) for k in models):
+        raise JobError("models: up to 6, names a-z0-9_")
     engine = inp.get("engine", "eevee")
     t0 = time.time()
     with tempfile.TemporaryDirectory() as tmp:
@@ -136,6 +143,21 @@ def cartoon(job):
             fetch(url, f"{run_dir}/voice/{i:02d}.{ext}")
         threads = str(os.cpu_count() or 4)
         env = {**os.environ, "CARTOON_NO_BLEND": "1", "CARTOON_CPU_THREADS": threads, "CARTOON_FFMPEG_THREADS": threads}
+
+        made, model_sec = 0, 0.0
+        if models and "models.py" in scripts:
+            # Props made to order: picture -> TripoSR -> voxels. A failure only costs the scene those models.
+            t_m = time.time()
+            runpod.serverless.progress_update(job, f"3D models ({len(models)})")
+            os.makedirs(f"{run_dir}/models")
+            try:
+                for name, url in models.items():
+                    fetch(url, f"{run_dir}/models/{name}.img")
+                run(["python", f"{eng}/models.py", run_dir], eng, env, 900, lambda line: print(line, end="", flush=True))
+            except JobError as err:
+                print(f"models failed: {err}", flush=True)
+            made = len([f for f in os.listdir(f"{run_dir}/models") if f.endswith(".json")])
+            model_sec = time.time() - t_m
 
         runpod.serverless.progress_update(job, "textures and timing")
         run(["python", f"{eng}/faces.py", run_dir], eng, env, 300)
@@ -167,7 +189,7 @@ def cartoon(job):
             raise JobError("upload failed: " + up.stderr[-400:])
         result = json.loads(up.stdout.strip().splitlines()[-1])
     return {**result, "durationSec": round(dur, 2), "renderSec": round(render_sec, 1), "totalSec": round(time.time() - t0, 1),
-            "frames": frames, "engine": engine, "gpu": gpu_name()}
+            "frames": frames, "engine": engine, "gpu": gpu_name(), "models": made, "modelSec": round(model_sec, 1)}
 
 
 def handler(job):

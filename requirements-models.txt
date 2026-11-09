@@ -1,0 +1,6 @@
+# TripoSR's runtime (its mesh export, background removal and video tools are not used: models.py stubs them)
+transformers==4.46.3
+huggingface-hub==0.26.2
+omegaconf==2.3.0
+einops==0.8.0
+scipy==1.14.1
