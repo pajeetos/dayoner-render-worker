@@ -1,0 +1,45 @@
+name: build worker image
+
+# Built here, not on a laptop: there is no Docker on the founder's Mac, and RunPod only needs an image URL.
+on:
+  push:
+    branches: [main]
+    paths:
+      - Dockerfile
+      - handler.py
+      - upload.mjs
+      - package.json
+      - requirements.txt
+      - .github/workflows/build.yml
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" \
+                      /usr/local/share/powershell /usr/share/swift || true
+          df -h /
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/dayoner-render-worker:latest
+            ghcr.io/${{ github.repository_owner }}/dayoner-render-worker:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
