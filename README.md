@@ -9,3 +9,10 @@ no product code and no keys. See `handler.py` for the job format; `{"input": {"k
 both render engines without uploading anything.
 
 The image is built by GitHub Actions on every push to `main`: `ghcr.io/pajeetos/dayoner-render-worker:latest`.
+
+## One scene on two GPUs
+
+A job may carry `split`: the lead makes the timing, faces and models, shares them through a one-file Blob token,
+renders the first half and assembles; a helper job renders the second half and shares its frames. They read each
+other's progress from a link the app signs. A helper that is late, failed or never got a GPU costs nothing but its
+own time: the lead renders that half itself. See `handler.py` for the format.
