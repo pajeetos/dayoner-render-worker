@@ -24,8 +24,8 @@ Job input:
             The api answers {"prep": url|null, "frames": url|null, "started", "failed", "taken": bool,
             "renderingFor": seconds since files.go or null}.
 
-Output: {"url", "bytes", "durationSec", "renderSec", "totalSec", "frames", "engine", "gpu", "models", "modelSec",
-         "split" (lead only)}; a helper returns {"helper": true, "frames", "engine", "gpu", "renderSec", "totalSec"}
+Output: {"url", "bytes", "durationSec", "renderSec", "totalSec", "frames", "fps", "beats" ([first, last] frame of
+         every beat), "engine", "gpu", "models", "modelSec", "split" (lead only)}; a helper returns {"helper": true, "frames", "engine", "gpu", "renderSec", "totalSec"}
          or {"skipped": "why"}.
 """
 import json
@@ -433,7 +433,8 @@ def cartoon(job):
         run(["python", f"{eng}/faces.py", run_dir], eng, env, 300)
         run(["python", f"{eng}/plan.py", run_dir], eng, env, 900)
         with open(f"{run_dir}/timeline.json") as f:
-            frames = json.load(f)["frames"]
+            tl = json.load(f)
+        frames = tl["frames"]
 
         t1 = time.time()
         runpod.serverless.progress_update(job, f"render 0/{frames}")
@@ -454,6 +455,8 @@ def cartoon(job):
         result = share(out, upload, "video/mp4")
     return {**result, "durationSec": round(dur, 2), "renderSec": round(render_sec, 1), "totalSec": round(time.time() - t0, 1),
             "frames": frames, "engine": engine, "gpu": gpu_name(), "models": made, "modelSec": round(model_sec, 1),
+            # [first, last] frame of every beat, so a later edit can say what plays at 0:12
+            "fps": tl.get("fps"), "beats": tl.get("beats") or [],
             **({"split": split_out} if split_out else {})}
 
 
