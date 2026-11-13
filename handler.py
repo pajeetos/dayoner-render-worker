@@ -4,7 +4,7 @@ The image carries the tools (Blender, ffmpeg, Whisper, Node); the render scripts
 engine is versioned with the app that sends it and this public image holds no product code.
 
 Job input:
-  kind      "cartoon" (default) or "probe" (GPU, Blender and engine check, no upload)
+  kind      "cartoon" (default), "probe" (GPU, Blender and engine check, no upload) or "separate" (below)
   scripts   {"faces.py": "...", "plan.py": "...", "scene.py": "...", "assemble.py": "...", "fonts.py": "..."}
   dialogue  the run's dialogue.json
   voices    one https link per line, in order (mp3 or wav)
@@ -27,6 +27,11 @@ Job input:
 Output: {"url", "bytes", "durationSec", "renderSec", "totalSec", "frames", "fps", "beats" ([first, last] frame of
          every beat), "engine", "gpu", "models", "modelSec", "split" (lead only)}; a helper returns {"helper": true, "frames", "engine", "gpu", "renderSec", "totalSec"}
          or {"skipped": "why"}.
+
+kind "separate": a video's voice apart from everything else in its sound (Demucs, baked into the image), for the
+voice changer. Input: {"url": https link to the video or audio, "script": separate.py (comes with the job),
+"uploads": {"vocals": {...}, "background": {...}}}. Output: {"vocals": {"url", "bytes"}, "background": {...},
+"durationSec", "vocalsDb", "backgroundDb", "mixDb", "separateSec", "device", "gpu", "totalSec"}, or {"noAudio": true}.
 """
 import json
 import os
@@ -469,12 +474,43 @@ def stop_helper(split):
         print(f"take mark failed: {str(err)[:200]}", flush=True)
 
 
+MAX_SEPARATE = 400 * 1024 * 1024
+
+
+def separate(job):
+    """Voice and background apart: the job's separate.py writes vocals.wav, background.flac and result.json."""
+    t0 = time.time()
+    inp = job["input"]
+    script = inp.get("script")
+    uploads = inp.get("uploads") or {}
+    if not isinstance(script, str) or not script.strip():
+        raise JobError("script missing")
+    if not all(isinstance(uploads.get(k), dict) and uploads[k].get("token") for k in ("vocals", "background")):
+        raise JobError("no upload token")
+    with tempfile.TemporaryDirectory() as tmp:
+        src = f"{tmp}/source"
+        fetch(inp.get("url"), src, MAX_SEPARATE)
+        with open(f"{tmp}/separate.py", "w", encoding="utf-8") as f:
+            f.write(script)
+        runpod.serverless.progress_update(job, "separate")
+        run(["python", f"{tmp}/separate.py", src, tmp], tmp, job_env(), 30 * 60)
+        with open(f"{tmp}/result.json", encoding="utf-8") as f:
+            result = json.load(f)
+        if result.get("noAudio"):
+            return {"noAudio": True, "gpu": gpu_name(), "totalSec": round(time.time() - t0, 1)}
+        result["vocals"] = share(f"{tmp}/vocals.wav", uploads["vocals"], "audio/wav")
+        result["background"] = share(f"{tmp}/background.flac", uploads["background"], "audio/flac")
+        return {**result, "gpu": gpu_name(), "totalSec": round(time.time() - t0, 1)}
+
+
 def handler(job):
     inp = job.get("input") or {}
     split = inp.get("split") if isinstance(inp.get("split"), dict) else None
     try:
         if inp.get("kind") == "probe":
             return probe(job)
+        if inp.get("kind") == "separate":
+            return separate(job)
         if split and split.get("role") == "helper":
             return helper(job)
         return cartoon(job)

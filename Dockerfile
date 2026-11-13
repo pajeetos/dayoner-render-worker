@@ -52,6 +52,11 @@ RUN mkdir -p /opt/triposr/weights \
  && curl -fsSL -o /opt/triposr/weights/config.yaml https://huggingface.co/stabilityai/TripoSR/resolve/main/config.yaml \
  && curl -fsSL -o /opt/triposr/weights/model.ckpt https://huggingface.co/stabilityai/TripoSR/resolve/main/model.ckpt \
  && python -c "from huggingface_hub import hf_hub_download; hf_hub_download('facebook/dino-vitb16', 'config.json')"
+# The voice apart from the background for "change voice" (Demucs htdemucs, MIT): torchaudio from the same CUDA index
+# as torch, so pip keeps torch as it is; the weights are baked in. The job brings separate.py.
+RUN pip install --no-cache-dir torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/cu128 \
+ && pip install --no-cache-dir demucs==4.0.1 \
+ && python -c "import torch; from demucs.pretrained import get_model; m = get_model('htdemucs'); print(torch.__version__, m.sources)"
 # Everything a job needs is in the image: no model downloads at run time.
 ENV HF_HUB_OFFLINE=1
 
